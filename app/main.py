@@ -37,4 +37,5 @@ def transfer(request: TransferRequest):
 
 @app.get("/transactions")
 def get_transactions():
+    
     return service.get_transactions()
