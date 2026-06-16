@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from app.services.account_service import AccountService
 
 app = FastAPI()
+from app.database.db import init_db
+
+init_db()
 service = AccountService()
 
 
@@ -14,6 +17,16 @@ class TransferRequest(BaseModel):
     sender_id: str
     receiver_id: str
     amount: float
+
+class DepositRequest(BaseModel):
+    user_id: str
+    amount: float
+
+
+@app.post("/account/deposit")
+def deposit(request: DepositRequest):
+    return service.deposit(request.user_id, request.amount)
+
 
 
 @app.post("/account/create")
@@ -37,5 +50,9 @@ def transfer(request: TransferRequest):
 
 @app.get("/transactions")
 def get_transactions():
-    
     return service.get_transactions()
+
+
+@app.get("/accounts")
+def get_all_accounts():
+    return service.get_all_accounts()    
