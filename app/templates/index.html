@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Offline UPI Simulator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>💸 Offline UPI Mesh System</h1>
+        <hr>
+
+        <div class="card">
+            <h3>Step 1: Create Offline Payment</h3>
+            <div class="form-group">
+                <input id="sender" placeholder="Sender ID (e.g., kalyan)">
+                <input id="receiver" placeholder="Receiver ID (e.g., rahul)">
+                <input type="number" id="amount" placeholder="Amount">
+                <button onclick="sendMoney()" class="btn btn-success">Inject Packet</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Step 2 & 3: Network Operations</h3>
+            <button onclick="gossip()" class="btn">Run Gossip Round</button>
+            <button onclick="flush()" class="btn">🚀 Settle Payments (Sync to Bank)</button>
+            <button onclick="resetSystem()" class="btn btn-danger">Reset All</button>
+
+            <div id="statusBox" class="status-msg" style="display:none;"></div>
+        </div>
+
+        <div class="dashboard-row">
+            <div class="pane">
+                <h3>🌐 Active Mesh Devices</h3>
+                <div id="devicesList">Loading devices...</div>
+            </div>
+
+            <div class="pane">
+                <h3>👤 Account Balances</h3>
+                <div id="balancesList">Loading balances...</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let isResetting = false;
+
+    async function refreshUI() {
+        if (isResetting) return;
+
+        try {
+            // Accounts
+            let accRes = await fetch("/accounts");
+            let accounts = await accRes.json();
+
+            let balHTML = "";
+            accounts.forEach(a => {
+                balHTML += `<div class="item"><b>${a.user_id}@upi</b>: ₹${a.balance}</div>`;
+            });
+            document.getElementById("balancesList").innerHTML =
+                balHTML || "No accounts found.";
+
+            // Mesh State
+            let meshRes = await fetch("/mesh/state");
+            let mesh = await meshRes.json();
+
+            let devHTML = "";
+
+            mesh.devices.forEach(d => {
+                let status = d.has_internet
+                    ? "🌐 BRIDGE NODE (Can Sync)"
+                    : "📴 OFFLINE DEVICE (Mesh Only)";
+
+                // Safe fallback chain for packet list or counter
+                let totalPackets = 0;
+                if (d.packets && Array.isArray(d.packets)) {
+                    totalPackets = d.packets.length;
+                } else if (d.packet_count !== undefined && d.packet_count !== null) {
+                    totalPackets = d.packet_count;
+                } else if (d.packets_count !== undefined && d.packets_count !== null) {
+                    totalPackets = d.packets_count;
+                }
+
+                devHTML += `<div class="item">
+                    <strong>${d.device_id || d.id || "Unknown Device"}</strong><br>
+                    ${status}<br>
+                    <small>📦 Packets held: ${totalPackets}</small>
+                </div>`;
+            });
+
+            document.getElementById("devicesList").innerHTML =
+                devHTML || "No devices in mesh.";
+
+        } catch (e) {
+            console.error("UI refresh error", e);
+        }
+    }
+
+    function showStatus(msg) {
+        let box = document.getElementById("statusBox");
+        box.innerText = msg;
+        box.style.display = "block";
+    }
+
+    async function sendMoney() {
+        await fetch("/demo/send", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                sender_id: document.getElementById("sender").value,
+                receiver_id: document.getElementById("receiver").value,
+                amount: parseFloat(document.getElementById("amount").value)
+            })
+        });
+
+        showStatus("💵 Packet injected into mesh network!");
+        refreshUI();
+    }
+
+    async function gossip() {
+        await fetch("/mesh/gossip", {method: "POST"});
+        showStatus("🔄 Gossip round completed (packets propagated)");
+        refreshUI();
+    }
+
+    async function flush() {
+        await fetch("/mesh/flush", {method: "POST"});
+        showStatus("🚀 Payments settled via bridge node");
+        refreshUI();
+    }
+
+    async function resetSystem() {
+        if (!confirm("Reset everything?")) return;
+
+        isResetting = true;
+
+        await fetch("/reset", {method: "POST"});
+
+        // clear UI instantly
+        document.getElementById("devicesList").innerHTML = "";
+        document.getElementById("balancesList").innerHTML = "";
+
+        showStatus("🧹 System fully reset (DB + Mesh cleared)");
+
+        await refreshUI();
+
+        isResetting = false;
+    }
+
+    // init + auto refresh
+    refreshUI();
+    setInterval(refreshUI, 3000);
+
+</script>
+
+</body>
+</html>

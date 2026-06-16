@@ -7,12 +7,21 @@ from app.models.account_table import AccountTable
 from app.simulator.mesh_simulator import mesh_simulator
 from app.services.demo_service import demo_service
 from app.services.bridge_service import BridgeService
-
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi import Request
+import os
 bridge_service = BridgeService()
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 service = AccountService()
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+
+templates = Jinja2Templates(directory=TEMPLATE_DIR)
 # -----------------------------
 # DB SEEDING (RUN ON STARTUP)
 # -----------------------------
@@ -37,15 +46,20 @@ def seed_users():
 
 @app.on_event("startup")
 def startup_event():
+    global service, bridge_service
+
     init_db()
     seed_users()
 
+    service = AccountService()
+    bridge_service = BridgeService()
 
 # -----------------------------
 # REQUEST MODELS
 # -----------------------------
+
 class CreateAccountRequest(BaseModel):
-    user_id: str
+   user_id: str
 
 
 class TransferRequest(BaseModel):
@@ -69,6 +83,11 @@ class DemoPaymentRequest(BaseModel):
 # -----------------------------
 # ACCOUNT APIs
 # -----------------------------
+#@app.post("/account/deposit")
+#def deposit(request: DepositRequest):
+#    return service.deposit(request.user_id, request.amount)
+
+
 @app.post("/account/deposit")
 def deposit(request: DepositRequest):
     return service.deposit(request.user_id, request.amount)
@@ -105,7 +124,15 @@ def get_transactions():
 
 @app.post("/reset")
 def reset():
-    return service.reset_all()
+    result = service.reset_all()
+
+    # ALSO reset mesh memory
+    for device in mesh_simulator.devices:
+        device.packets.clear()
+
+    return {
+        "message": "System fully reset (DB + Mesh cleared)"
+    }
 
 # -----------------------------
 # DEMO: OFFLINE PAYMENT
@@ -134,11 +161,18 @@ def run_gossip():
     mesh_simulator.gossip_round()
     return {"message": "Gossip round completed"}
 
-
 @app.get("/mesh/state")
 def get_mesh_state():
-    return mesh_simulator.get_state()
-
+    return {
+        "devices": [
+            {
+                "device_id": d.device_id,
+                "has_internet": d.has_internet,
+                "packets": [p.packet_id for p in d.packets]
+            }
+            for d in mesh_simulator.devices
+        ]
+    }
 
 @app.post("/mesh/flush")
 def flush_bridge():
@@ -157,3 +191,15 @@ def flush_bridge():
         "message": "Bridge flush completed",
         "results": results
     }
+
+
+# -----------------------------
+# FIXED HOME ROUTE
+# -----------------------------
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    # Using explicit keyword arguments prevents Starlette/Jinja2 positional signature confusion
+    return templates.TemplateResponse(
+        request=request, 
+        name="index.html"
+    )
