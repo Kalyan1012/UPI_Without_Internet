@@ -1,14 +1,49 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+
 from app.services.account_service import AccountService
+from app.database.db import init_db, SessionLocal
+from app.models.account_table import AccountTable
+from app.simulator.mesh_simulator import mesh_simulator
+from app.services.demo_service import demo_service
+from app.services.bridge_service import BridgeService
 
+bridge_service = BridgeService()
 app = FastAPI()
-from app.database.db import init_db
-
-init_db()
 service = AccountService()
 
 
+# -----------------------------
+# DB SEEDING (RUN ON STARTUP)
+# -----------------------------
+def seed_users():
+    db = SessionLocal()
+
+    users = ["kalyan", "cutie", "rahul", "madhu"]
+
+    for user in users:
+        if not user or len(user.strip()) == 0:
+            continue  # skip empty names
+
+        existing = db.query(AccountTable).filter(
+            AccountTable.user_id == user
+        ).first()
+
+        if not existing:
+            db.add(AccountTable(user_id=user, balance=1000))
+
+    db.commit()
+    db.close()
+
+@app.on_event("startup")
+def startup_event():
+    init_db()
+    seed_users()
+
+
+# -----------------------------
+# REQUEST MODELS
+# -----------------------------
 class CreateAccountRequest(BaseModel):
     user_id: str
 
@@ -19,15 +54,24 @@ class TransferRequest(BaseModel):
     receiver_id: str
     amount: float
 
+
 class DepositRequest(BaseModel):
     user_id: str
     amount: float
 
 
+class DemoPaymentRequest(BaseModel):
+    sender_id: str
+    receiver_id: str
+    amount: float
+
+
+# -----------------------------
+# ACCOUNT APIs
+# -----------------------------
 @app.post("/account/deposit")
 def deposit(request: DepositRequest):
     return service.deposit(request.user_id, request.amount)
-
 
 
 @app.post("/account/create")
@@ -50,11 +94,66 @@ def transfer(request: TransferRequest):
     )
 
 
+@app.get("/accounts")
+def get_all_accounts():
+    return service.get_all_accounts()
+
+
 @app.get("/transactions")
 def get_transactions():
     return service.get_transactions()
 
+@app.post("/reset")
+def reset():
+    return service.reset_all()
 
-@app.get("/accounts")
-def get_all_accounts():
-    return service.get_all_accounts()    
+# -----------------------------
+# DEMO: OFFLINE PAYMENT
+# -----------------------------
+@app.post("/demo/send")
+def demo_send(request: DemoPaymentRequest):
+    packet = demo_service.create_payment_packet(
+        sender_id=request.sender_id,
+        receiver_id=request.receiver_id,
+        amount=request.amount,
+    )
+
+    mesh_simulator.inject_packet(packet)
+
+    return {
+        "message": "Packet injected into mesh",
+        "packet_id": packet.packet_id,
+    }
+
+
+# -----------------------------
+# MESH SIMULATION APIs
+# -----------------------------
+@app.post("/mesh/gossip")
+def run_gossip():
+    mesh_simulator.gossip_round()
+    return {"message": "Gossip round completed"}
+
+
+@app.get("/mesh/state")
+def get_mesh_state():
+    return mesh_simulator.get_state()
+
+
+@app.post("/mesh/flush")
+def flush_bridge():
+    results = []
+
+    for device in mesh_simulator.devices:
+        if device.has_internet:
+            for packet in list(device.packets):  # copy safe iteration
+                result = bridge_service.process_bridge_packet(packet)
+                results.append(result)
+
+            # clear packets after upload
+            device.packets.clear()
+
+    return {
+        "message": "Bridge flush completed",
+        "results": results
+    }
