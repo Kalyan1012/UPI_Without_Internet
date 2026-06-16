@@ -14,6 +14,7 @@ class CreateAccountRequest(BaseModel):
 
 
 class TransferRequest(BaseModel):
+    transaction_id: str
     sender_id: str
     receiver_id: str
     amount: float
@@ -42,6 +43,7 @@ def get_account(user_id: str):
 @app.post("/account/transfer")
 def transfer(request: TransferRequest):
     return service.transfer(
+        request.transaction_id,
         request.sender_id,
         request.receiver_id,
         request.amount

@@ -10,7 +10,7 @@ from datetime import datetime
 
 class AccountService:
     def __init__(self):
-        pass  # no more in-memory storage
+        self.processed_transactions = set()
 
     # ---------------- CREATE ACCOUNT ----------------
     def create_account(self, user_id: str):
@@ -51,45 +51,55 @@ class AccountService:
             "balance": account.balance
         }
 
-    # ---------------- TRANSFER ----------------
-    def transfer(self, sender_id: str, receiver_id: str, amount: float):
+    def transfer(self, transaction_id: str, sender_id: str, receiver_id: str, amount: float):
         db = SessionLocal()
 
-        sender = db.query(AccountTable).filter(AccountTable.user_id == sender_id).first()
-        receiver = db.query(AccountTable).filter(AccountTable.user_id == receiver_id).first()
+        try:
+            # 🔒 STEP 1: check if transaction already exists in DB
+            existing_txn = db.query(TransactionTable).filter(
+            TransactionTable.id == transaction_id
+            ).first()
 
-        if not sender or not receiver:
+            if existing_txn:
+                return {"message": "duplicate transaction ignored"}
+
+            sender = db.query(AccountTable).filter(AccountTable.user_id == sender_id).first()
+            receiver = db.query(AccountTable).filter(AccountTable.user_id == receiver_id).first()
+
+            if not sender or not receiver:
+                raise HTTPException(status_code=404, detail="Account not found")
+
+            if sender.balance < amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+
+            # 💸 update balances
+            sender.balance -= amount
+            receiver.balance += amount
+
+            # 🧾 create transaction record
+            transaction = TransactionTable(
+                id=transaction_id,
+                sender_id=sender_id,
+                receiver_id=receiver_id,
+                amount=amount,
+                timestamp=datetime.utcnow()
+            )
+
+            db.add(transaction)
+
+            # 💾 commit everything together
+            db.commit()
+
+            # 🔒 mark idempotency AFTER success
+            self.processed_transactions.add(transaction_id)
+
+            return {
+                "message": "transfer successful",
+                "transaction_id": transaction.id
+            }
+
+        finally:
             db.close()
-            raise HTTPException(status_code=404, detail="Account not found")
-
-        if sender.balance < amount:
-            db.close()
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-
-        sender.balance -= amount
-        receiver.balance += amount
-
-
-
-        transaction = TransactionTable(
-        id=str(uuid.uuid4()),
-        sender_id=sender_id,
-        receiver_id=receiver_id,
-        amount=amount,
-        timestamp=datetime.utcnow()
-)
-
-        db.add(transaction)
-        db.commit()
-        db.close()
-        
-        return {
-            "id": transaction.id,
-            "sender_id": sender_id,
-            "receiver_id": receiver_id,
-            "amount": amount,
-            "timestamp": transaction.timestamp
-        }      
 
     def get_transactions(self):
         db = SessionLocal()
