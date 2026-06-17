@@ -151,8 +151,6 @@ def demo_send(request: DemoPaymentRequest):
         "message": "Packet injected into mesh",
         "packet_id": packet.packet_id,
     }
-
-
 # -----------------------------
 # MESH SIMULATION APIs
 # -----------------------------
